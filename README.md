@@ -1,5 +1,5 @@
 # Translation-of-Reddit-into-Russian
-Translation works via - tampermonkey
+Translation works via - tampermonkey (browser plugin)
 
 # Installation
 - 1.Download: Reddit Auto-Translator (Fixed Usernames)-3.1
