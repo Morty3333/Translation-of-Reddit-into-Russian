@@ -6,4 +6,4 @@ Translation works via - tampermonkey
 - 2.and add to tampermonkey
 - 3.DONE!
 
-![like on the screen](photo.jpg)
+<img src="presentation/my-photo.jpg" alt="ЙОУ" width="400" />
