@@ -1,0 +1,236 @@
+// ==UserScript==
+// @name         Reddit Auto-Translator (Fixed Usernames)
+// @namespace    http://tampermonkey.net/
+// @version      3.1
+// @description  Гарантированный перевод постов и комментариев на Reddit (без перевода имен)
+// @author       Deepseek to morty3333|mortru3333
+// @match        https://www.reddit.com/*
+// @icon         https://www.redditstatic.com/favicon.ico
+// @grant        GM_xmlhttpRequest
+// @connect      translate.googleapis.com
+// @run-at       document-idle
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // ========== КОНФИГУРАЦИЯ ==========
+    const config = {
+        targetLanguage: 'ru',          // Язык перевода (ru)
+        detectLanguage: 'auto',        // Автоопределение языка
+        translatePosts: true,          // Переводить посты
+        translateComments: true,       // Переводить комментарии
+        showLoadingIndicator: true,    // Показать "Перевод..."
+        showOriginalOnHover: true,     // Показать оригинал при наведении
+        maxLength: 5000,               // Макс. длина текста
+        delayBetweenRequests: 1000,    // Задержка между запросами
+        commentSelectors: [            // Селекторы для комментариев
+            '[data-testid="comment"]',
+            'div[id^="comment-"]',
+            'div.Comment',
+            'div.comment',
+            'div.thing.comment',
+            'shreddit-comment'
+        ]
+    };
+    // ==================================
+
+    // Очередь переводов
+    const translationQueue = [];
+    let isProcessing = false;
+
+    // Добавляем стили
+    const addStyles = () => {
+        const style = document.createElement('style');
+        style.textContent = `
+            .reddit-translated {
+                position: relative;
+            }
+            .translating-indicator {
+                color: #888;
+                font-style: italic;
+            }
+            .reddit-translated:hover {
+                background-color: rgba(255, 215, 0, 0.1);
+            }
+        `;
+        document.head.appendChild(style);
+    };
+
+    // Функция перевода
+    const translateText = (text, callback) => {
+        if (!text || text.length > config.maxLength) {
+            callback(null);
+            return;
+        }
+
+        const apiUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${config.detectLanguage}&tl=${config.targetLanguage}&dt=t&q=${encodeURIComponent(text)}`;
+
+        GM_xmlhttpRequest({
+            method: "GET",
+            url: apiUrl,
+            onload: function(response) {
+                try {
+                    const data = JSON.parse(response.responseText);
+                    let translated = '';
+                    if (data && data[0]) {
+                        data[0].forEach(item => {
+                            if (item && item[0]) translated += item[0];
+                        });
+                    }
+                    callback(translated || null);
+                } catch (e) {
+                    console.error('Translation error:', e, response.responseText);
+                    callback(null);
+                }
+            },
+            onerror: function(error) {
+                console.error('API error:', error);
+                callback(null);
+            }
+        });
+    };
+
+    // Обработка очереди
+    const processQueue = () => {
+        if (isProcessing || translationQueue.length === 0) return;
+
+        isProcessing = true;
+        const {element, originalText} = translationQueue.shift();
+
+        translateText(originalText, function(translated) {
+            if (translated) {
+                element.textContent = translated;
+                element.classList.add('reddit-translated');
+                element.classList.remove('translating-indicator');
+
+                if (config.showOriginalOnHover) {
+                    element.title = "Оригинал: " + originalText;
+                    element.style.borderBottom = "1px dashed #aaa";
+                    element.style.cursor = "help";
+                }
+
+                element.dataset.originalText = originalText;
+                element.dataset.translated = "true";
+            } else {
+                element.textContent = originalText;
+                element.classList.remove('translating-indicator');
+                element.dataset.translated = "error";
+            }
+
+            isProcessing = false;
+            setTimeout(processQueue, config.delayBetweenRequests);
+        });
+    };
+
+    // Добавление в очередь
+    const addToQueue = (element) => {
+        if (element.dataset.translated) return;
+
+        const originalText = element.textContent.trim();
+        if (!originalText || originalText.length < 3) return;
+
+        element.dataset.translated = "processing";
+
+        if (config.showLoadingIndicator) {
+            element.textContent = "Перевод...";
+            element.classList.add('translating-indicator');
+        }
+
+        translationQueue.push({
+            element: element,
+            originalText: originalText
+        });
+
+        if (!isProcessing) processQueue();
+    };
+
+    // ПОИСК ТОЛЬКО ТЕКСТА КОММЕНТАРИЕВ (ИСКЛЮЧАЕМ ИМЕНА)
+    const findComments = () => {
+        config.commentSelectors.forEach(selector => {
+            document.querySelectorAll(selector).forEach(comment => {
+                // Ищем только тело комментария, исключая имена пользователей
+                const commentBody = comment.querySelector(`
+                    [data-testid="comment"],
+                    .Comment__body,
+                    .comment-body,
+                    .md,
+                    .usertext-body,
+                    [data-click-id="body"],
+                    [data-test-id="comment-content"],
+                    p
+                `);
+
+                if (commentBody) {
+                    // Проверяем, что это не имя пользователя
+                    if (!commentBody.closest('header') &&
+                        !commentBody.closest('.comment-header') &&
+                        !commentBody.closest('.Comment__header') &&
+                        !commentBody.matches('a[href*="/user/"]') &&
+                        !commentBody.matches('.author')) {
+                        addToQueue(commentBody);
+                    }
+                }
+            });
+        });
+    };
+
+    // Поиск элементов для перевода
+    const findElementsToTranslate = () => {
+        try {
+            // Заголовки постов
+            if (config.translatePosts) {
+                document.querySelectorAll('h1, h2, h3, [slot="title"], [id^="post-title"], [data-adclicklocation="title"]').forEach(addToQueue);
+
+                // Текст постов
+                document.querySelectorAll('[data-test-id="post-content"], .Post__content, .RichTextJSON-root, [data-click-id="text"]').forEach(addToQueue);
+            }
+
+            // Комментарии (только текст, без имен)
+            if (config.translateComments) {
+                findComments();
+            }
+        } catch (e) {
+            console.error('Error in findElementsToTranslate:', e);
+        }
+    };
+
+    // Основная функция инициализации
+    const initTranslator = () => {
+        console.log("Reddit Translator initializing...");
+        addStyles();
+
+        // Первоначальная обработка
+        findElementsToTranslate();
+
+        // Observer для нового контента
+        const observer = new MutationObserver(mutations => {
+            for (const mutation of mutations) {
+                if (mutation.addedNodes.length) {
+                    setTimeout(findElementsToTranslate, 1000);
+                }
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+
+        // Периодическая проверка для динамического контента
+        setInterval(findElementsToTranslate, 5000);
+
+        // Обработка при скролле
+        window.addEventListener('scroll', findElementsToTranslate);
+
+        // Обработка при смене страниц
+        window.addEventListener('popstate', findElementsToTranslate);
+    };
+
+    // Запуск
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initTranslator);
+    } else {
+        setTimeout(initTranslator, 3000);
+    }
+})();
