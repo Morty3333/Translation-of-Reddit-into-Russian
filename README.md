@@ -5,5 +5,6 @@ Translation works via - tampermonkey (browser plugin)
 - 1.Download: Reddit Auto-Translator (Fixed Usernames)-3.1
 - 2.and add to tampermonkey
 - 3.DONE!
-СОХРОНИ БОГ Deepseek
+- СОХРОНИ БОГ Deepseek
+
 ![йоу](presentation/photo.jpg)
